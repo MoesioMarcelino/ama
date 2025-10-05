@@ -14,7 +14,7 @@ function getUserIdentifier(request: NextRequest): string {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { roomId: string; questionId: string } }
+  { params }: { params: Promise<{ roomId: string; questionId: string }> }
 ) {
   try {
     const { questionId } = await params;
@@ -85,7 +85,7 @@ export async function POST(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { roomId: string; questionId: string } }
+  { params }: { params: Promise<{ roomId: string; questionId: string }> }
 ) {
   try {
     const { questionId } = await params;

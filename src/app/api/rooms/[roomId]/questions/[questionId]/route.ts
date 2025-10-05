@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { roomId: string; questionId: string } }
+  { params }: { params: Promise<{ roomId: string; questionId: string }> }
 ) {
   try {
     const { questionId } = await params;
