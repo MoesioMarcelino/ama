@@ -1,81 +1,274 @@
-import {
-  Button,
-  Input,
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-  Skeleton,
-} from "@/components";
+"use client";
+
+import { Button, Skeleton, Textarea } from "@/components";
 import { cn } from "@/lib/utils";
-import { ArrowRight, ArrowUp, Share2 } from "lucide-react";
+import type { Question } from "@/types/api";
+import { ArrowRight, ArrowUp, Plus, Share2 } from "lucide-react";
 import Image from "next/image";
+import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 
-const questions = [
-  {
-    id: 1,
-    content:
-      "O que é GoLang e quais são suas principais vantagens em comparação com outras linguagens de programação como Python, Java ou C++?",
-    likes: 1,
-    liked: false,
-    answered: false,
-  },
-  {
-    id: 2,
-    content:
-      "Como funcionam as goroutines em GoLang e por que elas são importantes para a concorrência e paralelismo?",
-    likes: 190,
-    liked: true,
-    answered: false,
-  },
-  {
-    id: 3,
-    content:
-      "Quais são as melhores práticas para organizar o código em um projeto GoLang, incluindo pacotes, módulos e a estrutura de diretórios?",
-    likes: 190,
-    liked: true,
-    answered: true,
-  },
-  {
-    id: 4,
-    content:
-      "Quais são as melhores práticas para organizar o código em um projeto GoLang, incluindo pacotes, módulos e a estrutura de diretórios?",
-    likes: 0,
-    liked: false,
-    answered: false,
-  },
-];
+export default function Rooms() {
+  const params = useParams();
+  const roomId = params.roomId as string;
 
-export default async function Rooms({
-  params,
-}: Readonly<{
-  children: React.ReactNode;
-  params: { roomId: string };
-}>) {
-  const { roomId } = await params;
+  const router = useRouter();
 
-  const isLoading = false;
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [newQuestion, setNewQuestion] = useState("");
+  const [roomInfo, setRoomInfo] = useState<{ name?: string } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
+
+  // Fetch questions
+  const fetchQuestions = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/rooms/${roomId}/questions`);
+      if (response.ok) {
+        const data = await response.json();
+        // Sort questions by likes (descending), then by creation date (descending)
+        const sortedQuestions = data.questions.sort(
+          (a: Question, b: Question) => {
+            if (b.likes !== a.likes) {
+              return b.likes - a.likes;
+            }
+            return (
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+          }
+        );
+        setQuestions(sortedQuestions);
+      }
+    } catch (error) {
+      console.error("Error fetching questions:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [roomId]);
+
+  // Fetch room info
+  const fetchRoomInfo = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/rooms/${roomId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setRoomInfo(data.room);
+      }
+    } catch (error) {
+      console.error("Error fetching room info:", error);
+    }
+  }, [roomId]);
+
+  useEffect(() => {
+    fetchQuestions();
+    fetchRoomInfo();
+  }, [fetchQuestions, fetchRoomInfo]);
+
+  // Create new question
+  const handleCreateQuestion = async () => {
+    if (!newQuestion.trim() || isSubmitting) return;
+
+    try {
+      setIsSubmitting(true);
+      const response = await fetch(`/api/rooms/${roomId}/questions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content: newQuestion.trim() }),
+      });
+
+      if (response.ok) {
+        setNewQuestion("");
+        setIsTextareaExpanded(false); // Collapse textarea after creating question
+        await fetchQuestions(); // Refresh questions
+      }
+    } catch (error) {
+      console.error("Error creating question:", error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle textarea key events
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleCreateQuestion();
+    }
+  };
+
+  // Toggle like with optimistic updates
+  const handleToggleLike = async (
+    questionId: string,
+    currentlyLiked: boolean
+  ) => {
+    // Optimistic update - update UI immediately
+    const optimisticUpdate = (questions: Question[]) => {
+      return questions
+        .map((q) =>
+          q.id === questionId
+            ? {
+                ...q,
+                likes: currentlyLiked ? q.likes - 1 : q.likes + 1,
+                liked: !currentlyLiked,
+              }
+            : q
+        )
+        .sort((a, b) => {
+          // Sort by likes (descending), then by creation date (descending)
+          if (b.likes !== a.likes) {
+            return b.likes - a.likes;
+          }
+          return (
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+        });
+    };
+
+    // Apply optimistic update
+    setQuestions(optimisticUpdate);
+
+    try {
+      const method = currentlyLiked ? "DELETE" : "POST";
+      const response = await fetch(
+        `/api/rooms/${roomId}/questions/${questionId}/like`,
+        {
+          method,
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        // Update with real data from server and sort again
+        setQuestions((prev) =>
+          prev
+            .map((q) =>
+              q.id === questionId
+                ? { ...q, likes: data.likes, liked: data.liked }
+                : q
+            )
+            .sort((a, b) => {
+              if (b.likes !== a.likes) {
+                return b.likes - a.likes;
+              }
+              return (
+                new Date(b.createdAt).getTime() -
+                new Date(a.createdAt).getTime()
+              );
+            })
+        );
+      } else {
+        throw new Error("Failed to update like");
+      }
+    } catch (error) {
+      console.error("Error toggling like:", error);
+
+      // Revert optimistic update on error
+      setQuestions((prev) =>
+        prev
+          .map((q) =>
+            q.id === questionId
+              ? {
+                  ...q,
+                  likes: currentlyLiked ? q.likes + 1 : q.likes - 1,
+                  liked: currentlyLiked,
+                }
+              : q
+          )
+          .sort((a, b) => {
+            if (b.likes !== a.likes) {
+              return b.likes - a.likes;
+            }
+            return (
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+          })
+      );
+
+      toast("Erro ao curtir pergunta. Tente novamente.");
+    }
+  };
+
+  // Share room
+  const handleShareRoom = async () => {
+    const roomUrl = `${window.location.origin}/${roomId}`;
+
+    try {
+      await navigator.clipboard.writeText(roomUrl);
+      toast("Link da sala copiado para a área de transferência!");
+    } catch (error) {
+      console.error("Error copying to clipboard:", error);
+      toast(`Link da sala: ${roomUrl}`);
+    }
+  };
 
   const content = (
     <section className="flex flex-col gap-y-6 w-full mt-10">
       {/* Mobile view */}
       <div className="sm:hidden flex flex-col gap-y-2 w-full">
-        <Input placeholder="Qual a sua pergunta?" />
-        <Button className="flex items-center gap-x-2 cursor-pointer">
-          <span className="text-accent">Criar pergunta</span>
-          <ArrowRight className="text-accent" />
-        </Button>
+        <div className="relative">
+          <Textarea
+            placeholder="Qual a sua pergunta?"
+            value={newQuestion}
+            onChange={(e) => setNewQuestion(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setIsTextareaExpanded(true)}
+            onBlur={() => !newQuestion.trim() && setIsTextareaExpanded(false)}
+            className={cn(
+              "pr-12 pb-12 resize-none transition-all duration-300 ease-in-out",
+              isTextareaExpanded ? "min-h-[120px]" : "min-h-[48px]"
+            )}
+            rows={isTextareaExpanded ? 4 : 1}
+          />
+          <Button
+            className={cn(
+              "absolute right-2 h-8 w-8 p-0 cursor-pointer transition-all duration-300 ease-in-out",
+              isTextareaExpanded
+                ? "bottom-2 opacity-100"
+                : "bottom-2 opacity-60"
+            )}
+            onClick={handleCreateQuestion}
+            disabled={isSubmitting || !newQuestion.trim()}
+          >
+            <ArrowRight className="text-accent h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       {/* Desktop view */}
-      <InputGroup className="hidden  h-12 sm:flex">
-        <InputGroupInput placeholder="Qual a sua pergunta?" />
-        <InputGroupAddon align="inline-end">
-          <Button className="flex items-center gap-x-2 cursor-pointer">
-            <span className="text-accent">Criar pergunta</span>
-            <ArrowRight className="text-accent" />
+      <div className="hidden sm:block w-full">
+        <div className="relative">
+          <Textarea
+            placeholder="Qual a sua pergunta?"
+            value={newQuestion}
+            onChange={(e) => setNewQuestion(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setIsTextareaExpanded(true)}
+            onBlur={() => !newQuestion.trim() && setIsTextareaExpanded(false)}
+            className={cn(
+              "pr-12 pb-12 resize-none transition-all duration-300 ease-in-out",
+              isTextareaExpanded ? "min-h-[120px]" : "min-h-[48px]"
+            )}
+            rows={isTextareaExpanded ? 4 : 1}
+          />
+          <Button
+            className={cn(
+              "absolute right-2 h-8 w-8 p-0 cursor-pointer transition-all duration-300 ease-in-out",
+              isTextareaExpanded
+                ? "bottom-2 opacity-100"
+                : "bottom-2 opacity-60"
+            )}
+            onClick={handleCreateQuestion}
+            disabled={isSubmitting || !newQuestion.trim()}
+          >
+            <ArrowRight className="text-accent h-4 w-4" />
           </Button>
-        </InputGroupAddon>
-      </InputGroup>
+        </div>
+      </div>
 
       {/* Questions list */}
       <ul className="flex flex-col gap-y-10 list-none">
@@ -87,7 +280,8 @@ export default async function Rooms({
             })}
           >
             {index + 1}. {question.content}
-            <span
+            <button
+              onClick={() => handleToggleLike(question.id, question.liked)}
               className={cn("text-muted-foreground", {
                 "text-neutral-600": question.answered,
                 "text-primary": question.liked && !question.answered,
@@ -98,10 +292,16 @@ export default async function Rooms({
               <ArrowUp className="inline-block mr-1" size={16} />
               Curtir pergunta{" "}
               {question.likes > 0 && <span>({question.likes})</span>}
-            </span>
+            </button>
           </li>
         ))}
       </ul>
+
+      {questions.length === 0 && !isLoading && (
+        <div className="text-center text-muted-foreground py-8 flex flex-col items-center gap-y-8">
+          <p>Nenhuma pergunta ainda. Seja o primeiro a perguntar!</p>
+        </div>
+      )}
     </section>
   );
 
@@ -121,25 +321,40 @@ export default async function Rooms({
   );
 
   return (
-    <main className="flex flex-col items-center justify-center gap-y-6 p-7 sm:p-10 w-full">
+    <main className="flex flex-col justify-center gap-y-6 p-7 sm:p-10 w-full">
       <div className="sm:w-full flex gap-y-2 sm:items-center sm:justify-between">
-        <div className="flex items-center gap-x-2 w-full text-center">
+        <div className="flex flex-col w-full">
           <Image
             src="/logo.svg"
             alt="Ask Me Anything Logo"
-            width={32}
-            height={32}
+            width={40}
+            height={40}
+            className="mb-2"
           />
-          <p className="flex gap-x-1">
+          {roomInfo?.name && (
+            <p className="text-sm font-medium">{roomInfo.name}</p>
+          )}
+          <p className="flex gap-x-1 text-sm">
             <span className="text-muted-foreground">Código da sala:</span>
             <span>{roomId}</span>
           </p>
         </div>
 
-        <Button className="fixed bottom-8 right-8 sm:static items-center gap-x-2 cursor-pointer bg-primary sm:bg-zinc-700">
-          <span className="hidden sm:block">Compartilhar</span>
-          <Share2 />
-        </Button>
+        <div className="fixed bottom-8 right-8 sm:static items-center gap-x-2 ">
+          <div className="flex flex-col gap-y-4 sm:gap-y-2">
+            <Button onClick={() => router.push("/")}>
+              <span className="hidden sm:block">Nova sala</span>
+              <Plus />
+            </Button>
+            <Button
+              onClick={handleShareRoom}
+              className="cursor-pointer bg-zinc-700"
+            >
+              <span className="hidden sm:block">Compartilhar</span>
+              <Share2 />
+            </Button>
+          </div>
+        </div>
       </div>
 
       {isLoading ? loading : content}

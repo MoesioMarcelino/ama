@@ -1,3 +1,4 @@
+import { Toaster } from "@/components/ui/sonner";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -23,6 +24,7 @@ export default function RootLayout({
         className={`${geistSans.variable} antialiased dark max-w-[640px] mx-auto relative`}
       >
         {children}
+        <Toaster />
       </body>
     </html>
   );
